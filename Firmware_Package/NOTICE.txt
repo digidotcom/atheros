@@ -1,0 +1,158 @@
+This Notice.txt file contains certain notices of software components included
+with the software that QUALCOMM ATHEROS Incorporated (.Qualcomm Atheros.) is
+required to provide you. Notwithstanding anything in the notices in this file,
+your use of these software components together with the Qualcomm Atheros
+software (Qualcomm Atheros software hereinafter referred to as .Software.) is
+subject to the terms of your license from Qualcomm Atheros.  Compliance with
+all copyright laws and software license agreements included in the notice
+section of this file are the responsibility of the user.  Except as may be
+granted by separate express written agreement, this file provides no license
+to any patents, trademarks, copyrights, or other intellectual property of
+Qualcomm Atheros, or its affiliates.
+
+
+Copyright (c) 2011 QUALCOMM ATHEROS Incorporated.  All rights reserved.
+QUALCOMM ATHEROS® is a registered trademark and registered service mark of
+QUALCOMM ATHEROS Incorporated.  All other trademarks and service marks are the
+property of their respective owners.
+
+________________________________________
+NOTICES
+________________________________________
+
+File:
+
+1.	p2p_parse.c
+
+For this file, which was received with alternative licensing options for
+distribution, Qualcomm Atheros, Inc. has selected the BSD license.
+
+/*
+* Wi-Fi Protected Setup - attribute parsing
+* Copyright (c) 2008, Jouni Malinen <j@w1.fi>
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* Alternatively, this software may be distributed under the terms of BSD
+* license.
+*
+* See README and COPYING for more details.
+*/
+
+2.	queue.h
+
+//
+// Copyright (c) 1991, 1993
+//  The Regents of the University of California.  All rights reserved.
+// $ATH_LICENSE_NULL$
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+// 3. All advertising materials mentioning features or use of this software
+//    must display the following acknowledgement:
+//      This product includes software developed by the University of
+//      California, Berkeley and its contributors.
+// 4. Neither the name of the University nor the names of its contributors
+//    may be used to endorse or promote products derived from this software
+//    without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+//
+//  @(#)queue.h 8.5 (Berkeley) 8/20/94
+// $FreeBSD: src/sys/sys/queue.h,v 1.58 2004/04/07 04:19:49 imp Exp $
+// $Id: //depot/sw/branches/olca/include/queue.h#2 $
+//
+
+3.	ieee80211_defs.h
+
+/*-
+* Copyright (c) 2001 Atsushi Onoe
+* Copyright (c) 2002-2005 Sam Leffler, Errno Consulting
+* All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions
+* are met:
+* 1. Redistributions of source code must retain the above copyright
+* notice, this list of conditions and the following disclaimer.
+* 2. Redistributions in binary form must reproduce the above copyright
+* notice, this list of conditions and the following disclaimer in the
+* documentation and/or other materials provided with the distribution.
+* 3. The name of the author may not be used to endorse or promote products
+* derived from this software without specific prior written permission.
+*
+* Alternatively, this software may be distributed under the terms of the
+* GNU General Public License ("GPL") version 2 as published by the Free
+* Software Foundation.
+*
+* THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+* IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+* OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+* IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+* INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+* NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+* DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+* THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+* THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*
+* $FreeBSD: src/sys/net80211/ieee80211.h,v 1.8 2004/12/31 22:44:26 sam Exp $
+*/
+
+4.	whal_desc.h
+
+/*-
+* Copyright (c) 2002-2005 Sam Leffler, Errno Consulting, Atheros
+* Communications, Inc. All rights reserved.
+*
+* Redistribution and use in source and binary forms are permitted
+* provided that the following conditions are met:
+* 1. The materials contained herein are unmodified and are used
+* unmodified.
+* 2. Redistributions of source code must retain the above copyright
+* notice, this list of conditions and the following NO
+* ''WARRANTY'' disclaimer below (''Disclaimer''), without
+* modification.
+* 3. Redistributions in binary form must reproduce at minimum a
+* disclaimer similar to the Disclaimer below and any redistribution
+* must be conditioned upon including a substantially similar
+* Disclaimer requirement for further binary redistribution.
+* 4. Neither the names of the above-listed copyright holders nor the
+* names of any contributors may be used to endorse or promote
+* product derived from this software without specific prior written
+* permission.
+*
+* NO WARRANTY
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+* ''AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+* LIMITED TO, THE IMPLIED WARRANTIES OF NONINFRINGEMENT,
+* MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+* IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE
+* FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+* LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+* USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+* ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+* OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+* OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+* SUCH DAMAGES.
+*
+* $Id: ah_desc.h 904 2005-02-22 14:17:28Z otaku $
+*/

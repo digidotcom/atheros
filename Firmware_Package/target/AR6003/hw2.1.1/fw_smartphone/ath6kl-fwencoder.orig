@@ -1,0 +1,366 @@
+#!/usr/bin/python
+#
+# Copyright (c) 2012 Qualcomm Atheros, Incorporated
+# All Rights Reserved.
+# Qualcomm Atheros, Incorporated Confidential and Proprietary.
+#
+# Send questions to ath6kl-devel@qca.qualcomm.com
+#
+
+from ctypes import *
+from struct import *
+from optparse import OptionParser
+from time import time
+from math import ceil
+
+ATH6KL_FW_API_VERSION=3
+
+ATH6KL_SIGNATURE = "QCA-ATH6KL"
+MAX_LEN = 500000
+
+ATH6KL_FW_IE_FW_VERSION = 0
+ATH6KL_FW_IE_TIMESTAMP = 1
+ATH6KL_FW_IE_OTP_IMAGE = 2
+ATH6KL_FW_IE_FW_IMAGE = 3
+ATH6KL_FW_IE_PATCH_IMAGE = 4
+ATH6KL_FW_IE_RESERVED_RAM_SIZE = 5
+ATH6KL_FW_IE_CAPABILITIES = 6
+ATH6KL_FW_IE_PATCH_ADDR = 7
+ATH6KL_FW_IE_BOARD_ADDR = 8
+ATH6KL_FW_IE_VIF_MAX = 9
+
+ATH6KL_FW_CAPABILITY_HOST_P2P = 0
+ATH6KL_FW_CAPABILITY_SCHED_SCAN = 1
+ATH6KL_FW_CAPABILITY_STA_P2PDEV_DUPLEX = 2
+ATH6KL_FW_CAPABILITY_INACTIVITY_TIMEOUT = 3
+ATH6KL_FW_CAPABILITY_RSN_CAP_OVERRIDE = 4
+ATH6KL_FW_CAPABILITY_MULTICAST_FILTER = 5
+ATH6KL_FW_CAPABILITY_BMISS_ENHANCE = 6
+ATH6KL_FW_CAPABILITY_SCHED_SCAN_MATCH_LIST = 7
+ATH6KL_FW_CAPABILITY_RSSI_SCAN_THOLD = 8
+ATH6KL_FW_CAPABILITY_CUSTOM_MAC_ADDR = 9
+ATH6KL_FW_CAPABILITY_TX_ERR_NOTIFY = 10
+ATH6KL_FW_CAPABILITY_REGDOMAIN = 11
+ATH6KL_FW_CAPABILITY_SCHED_SCAN_V2 = 12
+ATH6KL_FW_CAPABILITY_HEART_BEAT_POLL = 13
+ATH6KL_FW_CAPABILITY_MAC_ACL = 14
+ATH6KL_FW_CAPABILITY_REGDOMAIN_V2 = 15
+ATH6KL_FW_CAPABILITY_MAX = 16
+
+capability_map = {
+    'host-p2p': ATH6KL_FW_CAPABILITY_HOST_P2P,
+    'sched-scan': ATH6KL_FW_CAPABILITY_SCHED_SCAN,
+    'sta-p2pdev': ATH6KL_FW_CAPABILITY_STA_P2PDEV_DUPLEX,
+    'inactivity-timeout': ATH6KL_FW_CAPABILITY_INACTIVITY_TIMEOUT,
+    'rsncap-override': ATH6KL_FW_CAPABILITY_RSN_CAP_OVERRIDE,
+    'multicast-filter': ATH6KL_FW_CAPABILITY_MULTICAST_FILTER,
+    'bmiss-enhance' : ATH6KL_FW_CAPABILITY_BMISS_ENHANCE,
+    'sched-scan-match-list': ATH6KL_FW_CAPABILITY_SCHED_SCAN_MATCH_LIST,
+    'rssi-scan' : ATH6KL_FW_CAPABILITY_RSSI_SCAN_THOLD,
+    'custom-mac-addr': ATH6KL_FW_CAPABILITY_CUSTOM_MAC_ADDR,
+    'tx-err-notify' : ATH6KL_FW_CAPABILITY_TX_ERR_NOTIFY,
+    'regdomain': ATH6KL_FW_CAPABILITY_REGDOMAIN,
+    'sched-scan-v2' : ATH6KL_FW_CAPABILITY_SCHED_SCAN_V2,
+    'hb-poll' : ATH6KL_FW_CAPABILITY_HEART_BEAT_POLL,
+    'mac-acl' : ATH6KL_FW_CAPABILITY_MAC_ACL,
+    'regdomain-v2': ATH6KL_FW_CAPABILITY_REGDOMAIN_V2,
+    }
+
+class FirmwareContainer:
+
+    def add_element(self, type_id, value):
+        length = len(value)
+        print "adding id %d length %d" % (type_id, length)
+        fmt = '<ii%ds' % length
+        pack_into(fmt, self.buf, self.buf_len, type_id, length, value)
+        self.buf_len = self.buf_len + 4 + 4 + length
+
+    def add_file(self, type_id, name):
+        f = open(name, 'rb')
+        payload = f.read()
+        self.add_element(type_id, payload)
+        f.close()
+
+    def add_u32(self, type_id, value):
+        buf = create_string_buffer(4)
+        pack_into("<i", buf, 0, int(value, 0))
+        self.add_element(type_id, buf.raw)
+
+    def read_u32(self, type_id):
+        (val,) = unpack_from("<i", self.elements[type_id])
+        return val
+
+    def set_capabilities(self, capabilities):
+
+        if (max(capabilities) >= ATH6KL_FW_CAPABILITY_MAX):
+            print "Error: capabilities out of maximium (%d >= %d)" % \
+                (max(capabilities), ATH6KL_FW_CAPABILITY_MAX)
+            return
+
+        length = int(ceil(ATH6KL_FW_CAPABILITY_MAX / float(8)))
+
+        bytes = [0] * length
+
+        for i in range(ATH6KL_FW_CAPABILITY_MAX):
+            if i not in capabilities:
+                continue
+
+            index = i / 8
+            bit = i % 8
+            bytes[index] = bytes[index] | (1 << bit)
+
+        buf = create_string_buffer(length)
+
+        for index in range(length):
+            pack_into('<B', buf, index, bytes[index])
+
+        self.add_element(ATH6KL_FW_IE_CAPABILITIES, buf.raw)
+
+    def get_capabilities(self):
+        buf = self.elements[ATH6KL_FW_IE_CAPABILITIES]
+        length = len(buf)
+
+        bits = []
+
+        for index in range(length):
+            val = unpack_from('<B', buf, index)[0]
+
+            for bit in range(8):
+                if val & 0x1:
+                    bits.append(index * 8 + bit)
+
+                val = val >> 1
+
+        return bits
+
+    def set_signature(self, signature):
+        self.signature = signature
+        self.signature_len = len(signature)
+
+        length = len(signature)
+        fmt = '<%dsb' % (length)
+        pack_into(fmt, self.buf, 0, signature, 0)
+        self.buf_len = length + 1
+
+    def write(self, name):
+        f = open(name, 'wb')
+        f.write(self.buf.raw[:self.buf_len])
+        f.close()
+
+        print "%d bytes written to %s" % (self.buf_len, name)
+
+    def open(self, name):
+        f = open(name, 'rb')
+        self.buf = f.read()
+        self.buf_len = len(self.buf)
+        f.close()
+
+        offset = 0
+
+        fmt = '<%dsb' % (self.signature_len)
+        (signature, null) = unpack_from(fmt, self.buf, offset)
+        offset = offset + self.signature_len + 1
+
+        if signature != self.signature or null != 0:
+            print "Invalid signature!"
+            return False
+
+        self.elements = {}
+
+        while offset + 4 + 4 < self.buf_len:
+            (type_id, length) = unpack_from("<ii", self.buf, offset)
+            offset = offset + 4 + 4
+
+            if offset + length > self.buf_len:
+                print "Buffer too short"
+                return
+
+            fmt = '<%ds' % length
+            (payload,) = unpack_from(fmt, self.buf, offset)
+            offset = offset + length
+
+            self.elements[type_id] = payload
+
+        return True
+        
+    def __init__(self, signature):
+        self.buf = create_string_buffer(MAX_LEN)
+        self.buf_len = 0
+
+        self.set_signature(signature)
+
+def usage():
+    print "Usage: ath6kl-fwencoder --create [OPTION]..."
+    print "Usage: ath6kl-fwencoder --dump FILE"
+    print "Usage: ath6kl-fwencoder --extract FILE"
+
+def write_file(filename, buf):
+    f = open(filename, 'w')
+    f.write(buf)
+    f.close
+
+def dump(options, args, extract=False):
+
+    if len(args) != 1:
+        usage()
+        return 1
+
+    filename = args[0]
+
+    c = FirmwareContainer(ATH6KL_SIGNATURE)
+    c.open(filename)
+
+    print "ath6kl-fwencoder --create \\"
+
+    for e in c.elements:
+        if e == ATH6KL_FW_IE_FW_VERSION:
+            print "--firmware-version=%s \\" % c.elements[e]
+        elif e == ATH6KL_FW_IE_TIMESTAMP:
+            print "--timestamp=%u \\" % c.read_u32(e)
+        elif e == ATH6KL_FW_IE_OTP_IMAGE:
+            if extract:
+                name="otp.bin"
+                print "--otp=%s \\" % name
+                write_file(name, c.elements[e])
+            else:
+                print "--otp %d B" % len(c.elements[e])
+        elif e == ATH6KL_FW_IE_FW_IMAGE:
+            if extract:
+                name = "athwlan.bin"
+                print "--firmware=%s \\" % name
+                write_file(name, c.elements[e])
+            else:
+                print "--firmware %d B" % len(c.elements[e])
+        elif e == ATH6KL_FW_IE_PATCH_IMAGE:
+            if extract:
+                name = "patch.bin"
+                print "--patch=%s \\" % name
+                write_file(name, c.elements[e])
+            else:
+                print "--patch %d B" % len(c.elements[e])
+        elif e == ATH6KL_FW_IE_RESERVED_RAM_SIZE:
+            print "--reserved-ram-size=%d \\" % c.read_u32(e)
+        elif e == ATH6KL_FW_IE_CAPABILITIES:
+            s = ""
+
+            for capa in c.get_capabilities():
+                # find value from the dict
+                name = [key for key, value in capability_map.iteritems() if value == capa][0]
+                s = s + name + ","
+
+            if len(s) > 0:
+                s = s[:-1]
+
+            print "--capabilities=%s \\" % s
+
+        elif e == ATH6KL_FW_IE_PATCH_ADDR:
+            print "--patch-address=0x%x \\" % c.read_u32(e)
+        elif e == ATH6KL_FW_IE_BOARD_ADDR:
+            print "--board-address=0x%x \\" % c.read_u32(e)
+        else:
+            print "Unknown IE: ", e
+
+    print
+
+def create(options):
+    output="fw-%d.bin" % ATH6KL_FW_API_VERSION
+
+    if options.output:
+        output = options.output
+
+    c = FirmwareContainer(ATH6KL_SIGNATURE)
+
+    if options.firmware_version:
+        c.add_element(ATH6KL_FW_IE_FW_VERSION, options.firmware_version)
+
+    # always add a timestamp
+    if options.timestamp:
+        stamp = str(int(options.timestamp))
+    else:
+        stamp = str(int(time()))
+
+    c.add_u32(ATH6KL_FW_IE_TIMESTAMP, stamp)
+
+    if options.app_start_override_addr:
+        c.add_u32(ATH6KL_FW_IE_APP_START_OVERRIDE_ADDR,
+                  options.app_start_override_addr)
+
+    if options.reserved_ram_size:
+        c.add_u32(ATH6KL_FW_IE_RESERVED_RAM_SIZE, options.reserved_ram_size)
+
+    if options.otp:
+        c.add_file(ATH6KL_FW_IE_OTP_IMAGE, options.otp)
+
+    if options.fw:
+        c.add_file(ATH6KL_FW_IE_FW_IMAGE, options.fw)
+
+    if options.patch:
+        c.add_file(ATH6KL_FW_IE_PATCH_IMAGE, options.patch)
+
+    if options.capabilities:
+        enabled = []
+        for capa in options.capabilities.split(','):
+            if capa not in capability_map:
+                print "Error: '%s' not found from the capability map" % capa
+                return 1
+
+            enabled.append(capability_map[capa])
+
+        c.set_capabilities(enabled)
+
+    if options.patch_address:
+        c.add_u32(ATH6KL_FW_IE_PATCH_ADDR, options.patch_address)
+
+    if options.board_address:
+        c.add_u32(ATH6KL_FW_IE_BOARD_ADDR, options.board_address)
+
+    if options.vif_max:
+        c.add_u32(ATH6KL_FW_IE_VIF_MAX, options.vif_max)
+
+    c.write(output)
+
+def main():
+    parser = OptionParser()
+    parser.add_option("-c", "--create", action="store_true", dest="create")
+    parser.add_option("-D", "--dump", action="store_true", dest="dump")
+    parser.add_option("-e", "--extract", action="store_true", dest="extract")
+
+    parser.add_option("-o", "--output", action="store", type="string",
+                      dest="output")
+    parser.add_option("-O", "--otp", action="store", type="string",
+                      dest="otp")
+    parser.add_option("-f", "--firmware", action="store", type="string",
+                      dest="fw")
+    parser.add_option("-p", "--patch", action="store", type="string",
+                      dest="patch")
+    parser.add_option("-F", "--firmware-version", action="store",
+                      type="string", dest="firmware_version")
+    parser.add_option("-t", "--timestamp", action="store",
+                      type="string", dest="timestamp")
+    parser.add_option("-a", "--app-start-override-addr", action="store",
+                      type="string", dest="app_start_override_addr")
+    parser.add_option("-r", "--reserved-ram-size", action="store",
+                      type="string", dest="reserved_ram_size")
+    parser.add_option("-C", "--capabilities", action="store",
+                      type="string", dest="capabilities")
+    parser.add_option("-P", "--patch-address", action="store",
+                      type="string", dest="patch_address")
+    parser.add_option("-B", "--board-address", action="store",
+                      type="string", dest="board_address")
+    parser.add_option("-I", "--vif-max", action="store",
+                      type="string", dest="vif_max")
+
+    (options, args) = parser.parse_args()
+
+
+    if options.create:
+        return create(options)
+    elif options.dump:
+        return dump(options, args)
+    elif options.extract:
+        return dump(options, args, extract=True)
+    else:
+        usage()
+        return 1
+
+main()

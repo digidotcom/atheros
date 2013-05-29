@@ -1,0 +1,11 @@
+config DEL_KMOD_ATHEROS
+	bool
+	depends on DEL_CCARDWMX28JS || DEL_CPX2
+	default y
+	help
+	  Atheros wireless driver
+
+config DEL_KMOD_ATHEROS_DIR
+	string
+	depends on DEL_KMOD_ATHEROS
+	default atheros
