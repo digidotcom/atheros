@@ -406,11 +406,7 @@ struct ieee80211_if_managed {
 	bool beacon_crc_valid;
 	u32 beacon_crc;
 
-	enum {
-		IEEE80211_MFP_DISABLED,
-		IEEE80211_MFP_OPTIONAL,
-		IEEE80211_MFP_REQUIRED
-	} mfp; /* management frame protection */
+    enum nl80211_mfp mfp; /* management frame protection */
 
 	int wmm_last_param_set;
 

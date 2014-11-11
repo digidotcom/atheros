@@ -1346,7 +1346,7 @@ static int ath6kl_sdio_probe(struct sdio_func *func,
 	}
 
 	ret = ath6kl_core_init(ar);
-	ath6kl_info("Current ath6kl driver version is: 3.4.0.158\n");
+	ath6kl_info("Current ath6kl driver version is: 3.4.0.225\n");
 	if (ret) {
 		ath6kl_err("Failed to init ath6kl core\n");
 		goto err_core_alloc;

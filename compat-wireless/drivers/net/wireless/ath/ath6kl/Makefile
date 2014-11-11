@@ -40,6 +40,7 @@ ath6kl_sdio-y += softmac.o
 ath6kl_sdio-y += wmiconfig.o
 ath6kl_sdio-y += recovery.o
 ath6kl_sdio-$(CONFIG_NL80211_TESTMODE) += testmode.o
+ath6kl_sdio-$(CONFIG_ATH6KL_LEDS) += leds.o
 
 obj-$(CONFIG_ATH6KL_USB) += ath6kl_usb.o
 ath6kl_usb-y += debug.o

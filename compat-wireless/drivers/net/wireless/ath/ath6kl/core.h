@@ -599,7 +599,11 @@ struct ath6kl_vif {
 	u16 ch_hint;
 	u16 bss_ch;
 	struct ath6kl_wep_key wep_key_list[WMI_MAX_KEY_INDEX + 1];
+#ifdef CONFIG_SUPPORT_11W
+	struct ath6kl_key keys[WMI_MAX_SUPPORT_11W_KEY_INDEX + 1];
+#else
 	struct ath6kl_key keys[WMI_MAX_KEY_INDEX + 1];
+#endif
 	struct aggr_info *aggr_cntxt;
 	struct ath6kl_htcap htcap[IEEE80211_NUM_BANDS];
 
@@ -628,6 +632,9 @@ struct ath6kl_vif {
 	struct wmi_connect_cmd profile;
 	u16 rsn_capab;
 
+#ifdef CONFIG_SUPPORT_11W
+	u16 rsn_cap;  /* for 802.11w */
+#endif
 	struct list_head mc_filter;
 };
 
@@ -811,6 +818,17 @@ struct ath6kl {
 		bool enable;
 	} fw_recovery;
 
+#ifdef CONFIG_ATH6KL_LEDS
+	unsigned short scanning_state;
+	unsigned short connection_state;
+	unsigned int activity_led;
+	unsigned int scanning_led;
+	unsigned int leds_active;
+	unsigned int rxtx_activity;
+	unsigned int rxtx_cnt;
+	struct timer_list activity_led_timer;
+#endif
+
 #ifdef CONFIG_ATH6KL_DEBUG
 	struct {
 		struct sk_buff_head fwlog_queue;
@@ -914,6 +932,9 @@ void ath6kl_tkip_micerr_event(struct ath6kl_vif *vif, u8 keyid, bool ismcast);
 void ath6kl_txpwr_rx_evt(void *devt, u8 tx_pwr);
 void ath6kl_scan_complete_evt(struct ath6kl_vif *vif, int status);
 void ath6kl_tgt_stats_event(struct ath6kl_vif *vif, u8 *ptr, u32 len);
+#ifdef CONFIG_SUPPORT_11W
+void ath6kl_get_rsn_cap_event(struct ath6kl_vif *vif, u16 rsn_cap);
+#endif
 void ath6kl_indicate_tx_activity(void *devt, u8 traffic_class, bool active);
 enum htc_endpoint_id ath6kl_ac2_endpoint_id(void *devt, u8 ac);
 

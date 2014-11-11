@@ -17,6 +17,9 @@
 
 #include "core.h"
 #include "debug.h"
+#ifdef CONFIG_ATH6KL_LEDS
+#include "leds.h"
+#endif
 
 /*
  * tid - tid_mux0..tid_mux3
@@ -708,6 +711,9 @@ void ath6kl_tx_complete(void *context, struct list_head *packet_queue)
 	bool flushing[ATH6KL_VIF_MAX] = {false};
 	u8 if_idx;
 	struct ath6kl_vif *vif;
+#ifdef CONFIG_ATH6KL_LEDS
+	bool is_led_toggle = false;
+#endif
 
 	skb_queue_head_init(&skb_queue);
 
@@ -822,9 +828,18 @@ void ath6kl_tx_complete(void *context, struct list_head *packet_queue)
 			spin_unlock_bh(&ar->list_lock);
 			netif_wake_queue(vif->ndev);
 			spin_lock_bh(&ar->list_lock);
+
+#ifdef CONFIG_ATH6KL_LEDS
+			is_led_toggle = true;
+#endif
 		}
 	}
 	spin_unlock_bh(&ar->list_lock);
+
+#ifdef CONFIG_ATH6KL_LEDS
+	if (is_led_toggle)
+		leds_toggle_activity_led(ar);
+#endif
 
 	if (wake_event)
 		wake_up(&ar->event_wq);
@@ -847,6 +862,10 @@ void ath6kl_tx_data_cleanup(struct ath6kl *ar)
 static void ath6kl_deliver_frames_to_nw_stack(struct net_device *dev,
 					      struct sk_buff *skb)
 {
+#ifdef CONFIG_ATH6KL_LEDS
+	struct ath6kl *ar = ath6kl_priv(dev);
+#endif
+
 	if (!skb)
 		return;
 
@@ -860,6 +879,10 @@ static void ath6kl_deliver_frames_to_nw_stack(struct net_device *dev,
 	skb->protocol = eth_type_trans(skb, skb->dev);
 
 	netif_rx_ni(skb);
+
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_toggle_activity_led(ar);
+#endif
 }
 
 static void ath6kl_alloc_netbufs(struct sk_buff_head *q, u16 num)

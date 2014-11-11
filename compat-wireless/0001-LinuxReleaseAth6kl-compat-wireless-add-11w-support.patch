@@ -1,0 +1,893 @@
+From 186f818bcf09ecd1290309d38844a349124c1386 Mon Sep 17 00:00:00 2001
+From: Shijie Zhang <shijiez@qca.qualcomm.com>
+Date: Mon, 20 May 2013 14:00:08 +0800
+Subject: [PATCH] LinuxWapiCcxReleaseAth6kl:compat-wireless: add 11w support
+ add optional support from wpa_supplicant to host driver for
+ linux packages Signed-off-by: Shijie Zhang
+ <shijiez@qca.qualcomm.com>
+
+---
+ config.mk                                     |    1 +
+ drivers/net/wireless/ath/ath6kl/cfg80211.c    |  103 +++++++++++++++++++++++--
+ drivers/net/wireless/ath/ath6kl/common.h      |    3 +
+ drivers/net/wireless/ath/ath6kl/core.h        |   10 +++
+ drivers/net/wireless/ath/ath6kl/debugfs_pri.c |   97 +++++++++++++++++++++++
+ drivers/net/wireless/ath/ath6kl/main.c        |   14 ++++
+ drivers/net/wireless/ath/ath6kl/wmi.c         |   90 +++++++++++++++++++++
+ drivers/net/wireless/ath/ath6kl/wmi.h         |   44 +++++++++++
+ include/linux/ieee80211.h                     |    5 ++
+ include/linux/nl80211.h                       |    8 +-
+ include/net/cfg80211.h                        |    6 +-
+ net/mac80211/ieee80211_i.h                    |    6 +-
+ net/mac80211/mlme.c                           |   12 ++-
+ net/wireless/core.h                           |    4 +-
+ net/wireless/mlme.c                           |    8 +-
+ net/wireless/nl80211.c                        |   31 +++++---
+ net/wireless/sme.c                            |    4 +-
+ 17 files changed, 405 insertions(+), 41 deletions(-)
+
+diff --git a/config.mk b/config.mk
+index 5567d90..daad171 100644
+--- a/config.mk
++++ b/config.mk
+@@ -617,6 +617,7 @@ CONFIG_ATH6KL_SDIO=m
+ CONFIG_ATH6KL_USB=m
+ CONFIG_ATH6KL_DEBUG=y
+ CONFIG_ATH6KL_REGDOMAIN=y
++CONFIG_SUPPORT_11W=y
+ endif #CONFIG_COMPAT_KERNEL_2_6_27
+ 
+ ifndef CONFIG_COMPAT_KERNEL_2_6_29
+diff --git a/drivers/net/wireless/ath/ath6kl/cfg80211.c b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+index 7e8c827..8bcd06e 100644
+--- a/drivers/net/wireless/ath/ath6kl/cfg80211.c
++++ b/drivers/net/wireless/ath/ath6kl/cfg80211.c
+@@ -279,7 +279,24 @@ static void ath6kl_set_key_mgmt(struct ath6kl_vif *vif, u32 key_mgmt)
+ 			vif->auth_mode = WPA_AUTH_CCKM;
+ 		else if (vif->auth_mode == WPA2_AUTH)
+ 			vif->auth_mode = WPA2_AUTH_CCKM;
++#ifdef CONFIG_SUPPORT_11W
++	} else if (key_mgmt == WLAN_AKM_SUITE_8021X_SHA256) {
++		if (vif->auth_mode == WPA_AUTH){
++			ath6kl_err("%s: auth_mode %x not supported key_mgmt %x\n", __func__, vif->auth_mode,key_mgmt);
++			return ;
++		}
++		else if (vif->auth_mode == WPA2_AUTH)
++			vif->auth_mode = WPA2_AUTH_SHA256;
++	} else if (key_mgmt == WLAN_AKM_SUITE_PSK_SHA256) {
++		if (vif->auth_mode == WPA_AUTH){
++			ath6kl_err("%s: auth_mode %x not supported key_mgmt %x\n", __func__, vif->auth_mode,key_mgmt);
++			return ;
++		}
++		else if (vif->auth_mode == WPA2_AUTH)
++			vif->auth_mode = WPA2_PSK_AUTH_SHA256;
++#endif
+ 	} else if (key_mgmt != WLAN_AKM_SUITE_8021X) {
++
+ 		vif->auth_mode = NONE_AUTH;
+ 	}
+ }
+@@ -530,6 +547,21 @@ static int ath6kl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
+ 	if (sme->bssid && !is_broadcast_ether_addr(sme->bssid))
+ 		memcpy(vif->req_bssid, sme->bssid, sizeof(vif->req_bssid));
+ 
++#ifdef CONFIG_SUPPORT_11W
++	{
++		u16 rsn_cap =  0;
++        
++        ath6kl_err("ath6kl_cfg80211_connect: sme->mfp = %d\n", sme->mfp);
++        if ( sme->mfp == NL80211_MFP_REQUIRED ) {
++            rsn_cap = 0xc0;
++        }else if ( sme->mfp == NL80211_MFP_OPTIONAL ) {
++            rsn_cap = 0x80;
++        }
++		ath6kl_wmi_set_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx, rsn_cap);
++	}
++#endif
++
++
+ 	ath6kl_set_wpa_version(vif, sme->crypto.wpa_versions);
+ 
+ 	status = ath6kl_set_auth_type(vif, sme->auth_type);
+@@ -1132,6 +1164,9 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 	int seq_len;
+ 	u8 key_usage;
+ 	u8 key_type;
++#ifdef CONFIG_SUPPORT_11W
++	u8 max_key_index;
++#endif
+ 
+ 	if (!ath6kl_cfg80211_ready(vif))
+ 		return -EIO;
+@@ -1143,10 +1178,19 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 					      params->key);
+ 	}
+ 
++
++#ifdef CONFIG_SUPPORT_11W
++	if (WLAN_CIPHER_SUITE_AES_CMAC == params->cipher)
++		max_key_index = WMI_MAX_SUPPORT_11W_KEY_INDEX;
++	else
++		max_key_index = WMI_MAX_KEY_INDEX;
++	if (key_index > max_key_index) {
++#else
+ 	if (key_index > WMI_MAX_KEY_INDEX) {
++#endif
+ 		ath6kl_dbg(ATH6KL_DBG_WLAN_CFG,
+-			   "%s: key index %d out of bounds\n", __func__,
+-			   key_index);
++				"%s: key index %d out of bounds\n", __func__,
++				key_index);
+ 		return -ENOENT;
+ 	}
+ 
+@@ -1191,6 +1235,12 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 		key_type = WAPI_CRYPT;
+ 		break;
+ 
++#ifdef CONFIG_SUPPORT_11W
++	case WLAN_CIPHER_SUITE_AES_CMAC:
++		key_type = AES_128_CMAC_CRYPT;
++		break;
++#endif
++
+ 	default:
+ 		return -ENOTSUPP;
+ 	}
+@@ -1240,11 +1290,24 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
+ 		return 0;
+ 	}
+ 
+-	return ath6kl_wmi_addkey_cmd(ar->wmi, vif->fw_vif_idx, key_index,
+-				     key_type, key_usage, key->key_len,
+-				     key->seq, key->seq_len, key->key,
+-				     KEY_OP_INIT_VAL,
+-				     (u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
++#ifdef CONFIG_SUPPORT_11W
++	if (AES_128_CMAC_CRYPT == key_type){
++		return ath6kl_wmi_addigtk_cmd(ar->wmi, vif->fw_vif_idx, key_index,
++				key_type, key_usage, key->key_len,
++				key->seq, key->seq_len, key->key,
++				KEY_OP_INIT_VAL,
++				(u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
++	}else {
++#endif
++		return ath6kl_wmi_addkey_cmd(ar->wmi, vif->fw_vif_idx, key_index,
++				key_type, key_usage, key->key_len,
++				key->seq, key->seq_len, key->key,
++				KEY_OP_INIT_VAL,
++				(u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
++#ifdef CONFIG_SUPPORT_11W
++	}
++#endif
++
+ }
+ 
+ static int ath6kl_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
+@@ -1259,7 +1322,12 @@ static int ath6kl_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
+ 	if (!ath6kl_cfg80211_ready(vif))
+ 		return -EIO;
+ 
++#ifdef CONFIG_SUPPORT_11W
++	if (key_index > WMI_MAX_SUPPORT_11W_KEY_INDEX) {
++#else
+ 	if (key_index > WMI_MAX_KEY_INDEX) {
++#endif
++
+ 		ath6kl_dbg(ATH6KL_DBG_WLAN_CFG,
+ 			   "%s: key index %d out of bounds\n", __func__,
+ 			   key_index);
+@@ -1711,6 +1779,9 @@ static const u32 cipher_suites[] = {
+ 	WLAN_CIPHER_SUITE_CCMP,
+ 	CCKM_KRK_CIPHER_SUITE,
+ 	WLAN_CIPHER_SUITE_SMS4,
++#ifdef CONFIG_SUPPORT_11W
++	WLAN_CIPHER_SUITE_AES_CMAC,
++#endif
+ };
+ 
+ static bool is_rate_legacy(s32 rate)
+@@ -2789,6 +2860,20 @@ static int ath6kl_ap_beacon(struct wiphy *wiphy, struct net_device *dev,
+ 			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
+ 				p.auth_mode |= WPA2_PSK_AUTH;
+ 			break;
++#ifdef CONFIG_SUPPORT_11W
++		case WLAN_AKM_SUITE_8021X_SHA256:
++			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_1)
++				ath6kl_err("WLAN_AKM_SUITE_8021X_SHA256 is not supported in wpa_versions %x\n",info->crypto.wpa_versions);
++			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
++				p.auth_mode |= WPA2_AUTH_SHA256;
++			break;
++		case WLAN_AKM_SUITE_PSK_SHA256:
++			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_1)
++				ath6kl_err("WLAN_AKM_SUITE_PSK_SHA256 is not supported in wpa_versions %x\n",info->crypto.wpa_versions);
++			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
++				p.auth_mode |= WPA2_PSK_AUTH_SHA256;
++			break;
++#endif
+ 		}
+ 	}
+ 	if (p.auth_mode == 0)
+@@ -2858,7 +2943,11 @@ static int ath6kl_ap_beacon(struct wiphy *wiphy, struct net_device *dev,
+ 	 * advertise the same in beacon/probe response. Send
+ 	 * the complete RSN IE capability field to firmware
+ 	 */
++#ifdef CONFIG_SUPPORT_11W
++	if ((p.auth_mode & (WPA2_AUTH | WPA2_PSK_AUTH | WPA2_AUTH_SHA256 | WPA2_PSK_AUTH_SHA256)) && (info->tail) &&
++#else
+ 	if ((p.auth_mode & (WPA2_AUTH | WPA2_PSK_AUTH)) && (info->tail) &&
++#endif
+ 	    test_bit(ATH6KL_FW_CAPABILITY_RSN_CAP_OVERRIDE,
+ 		     ar->fw_capabilities)) {
+ 		rsn_capb = 0;
+diff --git a/drivers/net/wireless/ath/ath6kl/common.h b/drivers/net/wireless/ath/ath6kl/common.h
+index f78c59c..622063d 100644
+--- a/drivers/net/wireless/ath/ath6kl/common.h
++++ b/drivers/net/wireless/ath/ath6kl/common.h
+@@ -73,6 +73,9 @@ enum crypto_type {
+ 	TKIP_CRYPT          = 0x04,
+ 	AES_CRYPT           = 0x08,
+ 	WAPI_CRYPT          = 0x10,
++#ifdef CONFIG_SUPPORT_11W
++	AES_128_CMAC_CRYPT  = 0x20,
++#endif
+ };
+ 
+ struct htc_endpoint_credit_dist;
+diff --git a/drivers/net/wireless/ath/ath6kl/core.h b/drivers/net/wireless/ath/ath6kl/core.h
+index 1a97a1f..ac240df 100644
+--- a/drivers/net/wireless/ath/ath6kl/core.h
++++ b/drivers/net/wireless/ath/ath6kl/core.h
+@@ -599,7 +599,11 @@ struct ath6kl_vif {
+ 	u16 ch_hint;
+ 	u16 bss_ch;
+ 	struct ath6kl_wep_key wep_key_list[WMI_MAX_KEY_INDEX + 1];
++#ifdef CONFIG_SUPPORT_11W
++	struct ath6kl_key keys[WMI_MAX_SUPPORT_11W_KEY_INDEX + 1];
++#else
+ 	struct ath6kl_key keys[WMI_MAX_KEY_INDEX + 1];
++#endif
+ 	struct aggr_info *aggr_cntxt;
+ 	struct ath6kl_htcap htcap[IEEE80211_NUM_BANDS];
+ 
+@@ -628,6 +632,9 @@ struct ath6kl_vif {
+ 	struct wmi_connect_cmd profile;
+ 	u16 rsn_capab;
+ 
++#ifdef CONFIG_SUPPORT_11W
++	u16 rsn_cap;  /* for 802.11w */
++#endif
+ 	struct list_head mc_filter;
+ };
+ 
+@@ -914,6 +921,9 @@ void ath6kl_tkip_micerr_event(struct ath6kl_vif *vif, u8 keyid, bool ismcast);
+ void ath6kl_txpwr_rx_evt(void *devt, u8 tx_pwr);
+ void ath6kl_scan_complete_evt(struct ath6kl_vif *vif, int status);
+ void ath6kl_tgt_stats_event(struct ath6kl_vif *vif, u8 *ptr, u32 len);
++#ifdef CONFIG_SUPPORT_11W
++void ath6kl_get_rsn_cap_event(struct ath6kl_vif *vif, u16 rsn_cap);
++#endif
+ void ath6kl_indicate_tx_activity(void *devt, u8 traffic_class, bool active);
+ enum htc_endpoint_id ath6kl_ac2_endpoint_id(void *devt, u8 ac);
+ 
+diff --git a/drivers/net/wireless/ath/ath6kl/debugfs_pri.c b/drivers/net/wireless/ath/ath6kl/debugfs_pri.c
+index 79a4746..34682be 100644
+--- a/drivers/net/wireless/ath/ath6kl/debugfs_pri.c
++++ b/drivers/net/wireless/ath/ath6kl/debugfs_pri.c
+@@ -195,6 +195,99 @@ static const struct file_operations fops_bmisstime = {
+ 	.llseek = default_llseek,
+ };
+ 
++#ifdef CONFIG_SUPPORT_11W
++static ssize_t ath6kl_rsn_cap_write(struct file *file,
++		const char __user *user_buf,
++		size_t count, loff_t *ppos)
++{
++	struct ath6kl *ar = file->private_data;
++	struct ath6kl_vif *vif;
++	u16 rsn_cap;
++	char buf[32];
++	ssize_t len;
++	int ret;
++
++	if (WARN_ON(!test_bit(WMI_READY, &ar->flag)))
++		return -EIO;
++
++	vif = ath6kl_vif_first(ar);
++	if (!vif)
++		return -EIO;
++
++	len = min(count, sizeof(buf) - 1);
++	if (copy_from_user(buf, user_buf, len))
++		return -EFAULT;
++
++	buf[len] = '\0';
++	if (kstrtou16(buf, 0, &rsn_cap))
++		return -EINVAL;
++
++	vif->rsn_cap = rsn_cap;
++
++	ret = ath6kl_wmi_set_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx,
++			vif->rsn_cap);
++	if (ret) {
++		ath6kl_err("failed to set rsn cap:%d\n", ret);
++		return ret;
++	}
++
++	return count;
++}
++
++static ssize_t ath6kl_rsn_cap_read(struct file *file, char __user *user_buf,
++		size_t count, loff_t *ppos)
++{
++	struct ath6kl *ar = file->private_data;
++	struct ath6kl_vif *vif;
++	char buf[32];
++	long left;
++	int ret;
++	ssize_t len;
++
++	if (WARN_ON(!test_bit(WMI_READY, &ar->flag)))
++		return -EIO;
++
++	vif = ath6kl_vif_first(ar);
++	if (!vif)
++		return -EIO;
++
++	if (down_interruptible(&ar->sem)) {
++		return -EBUSY;
++	}
++
++	set_bit(STATS_UPDATE_PEND, &vif->flags);
++
++	ret = ath6kl_wmi_get_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx);
++	if (ret) {
++		up(&ar->sem);
++		ath6kl_err("ath6kl_wmi_get_rsn_cap_cmd failed:%d \n", ret);
++		return -EIO;
++	}
++
++	left = wait_event_interruptible_timeout(ar->event_wq,
++			!test_bit(STATS_UPDATE_PEND,
++				&vif->flags), WMI_TIMEOUT);
++
++	up(&ar->sem);
++
++	if (left <= 0) {
++		ath6kl_err("wait_event_interruptible_timeout\n");
++		return -ETIMEDOUT;
++	}
++
++	len = scnprintf(buf, sizeof(buf), "%u\n", vif->rsn_cap);
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static const struct file_operations fops_rsn_cap = {
++	.open = ath6kl_debugfs_open_pri,
++	.read = ath6kl_rsn_cap_read,
++	.write = ath6kl_rsn_cap_write,
++	.owner = THIS_MODULE,
++	.llseek = default_llseek,
++};
++#endif
++
+ int ath6kl_init_debugfs_pri(struct ath6kl *ar)
+ {
+ 	debugfs_create_file("inactivity_period", S_IWUSR, ar->debugfs_phy, ar,
+@@ -202,6 +295,10 @@ int ath6kl_init_debugfs_pri(struct ath6kl *ar)
+ 
+ 	debugfs_create_file("bmiss_time", S_IRUSR | S_IWUSR, ar->debugfs_phy,
+ 			    ar, &fops_bmisstime);
++#ifdef CONFIG_SUPPORT_11W
++	debugfs_create_file("rsn_cap", S_IRUSR | S_IWUSR, ar->debugfs_phy, ar,
++			&fops_rsn_cap);
++#endif
+ 
+ 	return 0;
+ }
+diff --git a/drivers/net/wireless/ath/ath6kl/main.c b/drivers/net/wireless/ath/ath6kl/main.c
+index 3280f05..21cc7a9 100644
+--- a/drivers/net/wireless/ath/ath6kl/main.c
++++ b/drivers/net/wireless/ath/ath6kl/main.c
+@@ -910,6 +910,20 @@ void ath6kl_tgt_stats_event(struct ath6kl_vif *vif, u8 *ptr, u32 len)
+ 	}
+ }
+ 
++#ifdef CONFIG_SUPPORT_11W
++void ath6kl_get_rsn_cap_event(struct ath6kl_vif *vif, u16 rsn_cap)
++{
++	struct ath6kl *ar = vif->ar;
++
++	vif->rsn_cap = rsn_cap;
++
++	if (test_bit(STATS_UPDATE_PEND, &vif->flags)) {
++		clear_bit(STATS_UPDATE_PEND, &vif->flags);
++		wake_up(&ar->event_wq);
++	}
++}
++#endif
++
+ void ath6kl_wakeup_event(void *dev)
+ {
+ 	struct ath6kl *ar = (struct ath6kl *) dev;
+diff --git a/drivers/net/wireless/ath/ath6kl/wmi.c b/drivers/net/wireless/ath/ath6kl/wmi.c
+index 8aebf56..49cb0af 100644
+--- a/drivers/net/wireless/ath/ath6kl/wmi.c
++++ b/drivers/net/wireless/ath/ath6kl/wmi.c
+@@ -1338,6 +1338,22 @@ static int ath6kl_wmi_stats_event_rx(struct wmi *wmi, u8 *datap, int len,
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_SUPPORT_11W
++static int ath6kl_wmi_get_rsn_cap_rx(struct wmi *wmi, u8 *datap, int len,
++		struct ath6kl_vif *vif)
++{
++	struct wmi_rsn_cap_cmd *reply;
++
++	if (len < sizeof(struct wmi_rsn_cap_cmd))
++		return -EINVAL;
++
++	reply = (struct wmi_rsn_cap_cmd *) datap;
++	ath6kl_get_rsn_cap_event(vif, le16_to_cpu(reply->rsn_cap));
++
++	return 0;
++}
++#endif
++
+ static u8 ath6kl_wmi_get_upper_threshold(s16 rssi,
+ 					 struct sq_threshold_params *sq_thresh,
+ 					 u32 size)
+@@ -2198,6 +2214,32 @@ int ath6kl_wmi_bmisstime_cmd(struct wmi *wmi, u8 if_idx,
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SUPPORT_11W
++int ath6kl_wmi_set_rsn_cap_cmd(struct wmi *wmi, u8 if_idx,
++		u16 rsn_cap)
++{
++	struct sk_buff *skb;
++	struct wmi_rsn_cap_cmd *cmd;
++	int ret;
++
++	skb = ath6kl_wmi_get_new_buf(sizeof(*cmd));
++	if (!skb)
++		return -ENOMEM;
++
++	cmd = (struct wmi_rsn_cap_cmd *) skb->data;
++	cmd->rsn_cap = cpu_to_le16(rsn_cap);
++
++	ret = ath6kl_wmi_cmd_send(wmi, if_idx, skb, WMI_SET_RSN_CAP_CMDID,
++			NO_SYNC_WMIFLAG);
++	return ret;
++}
++
++int ath6kl_wmi_get_rsn_cap_cmd(struct wmi *wmi, u8 if_idx)
++{
++	return ath6kl_wmi_simple_cmd(wmi, if_idx, WMI_GET_RSN_CAP_CMDID);
++}
++#endif
++
+ int ath6kl_wmi_powermode_cmd(struct wmi *wmi, u8 if_idx, u8 pwr_mode)
+ {
+ 	struct sk_buff *skb;
+@@ -2313,6 +2355,48 @@ int ath6kl_wmi_addkey_cmd(struct wmi *wmi, u8 if_idx, u8 key_index,
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SUPPORT_11W
++int ath6kl_wmi_addigtk_cmd(struct wmi *wmi, u8 if_idx, u8 key_index,
++		enum crypto_type key_type,
++		u8 key_usage, u8 key_len,
++		u8 *key_rsc, unsigned int key_rsc_len,
++		u8 *key_material,
++		u8 key_op_ctrl, u8 *mac_addr,
++		enum wmi_sync_flag sync_flag)
++{
++	struct sk_buff *skb;
++	struct wmi_add_igtk_key_cmd *cmd;
++	int ret;
++
++	ath6kl_dbg(ATH6KL_DBG_WMI, "addigtk cmd: key_index=%u key_type=%d "
++			"key_usage=%d key_len=%d key_op_ctrl=%d\n",
++			key_index, key_type, key_usage, key_len, key_op_ctrl);
++
++	if ((key_index > WMI_MAX_SUPPORT_11W_KEY_INDEX) || (key_len > WMI_MAX_KEY_LEN) ||
++			(key_material == NULL) || key_rsc_len > 6)
++		return -EINVAL;
++
++	if ((WEP_CRYPT != key_type) && (NULL == key_rsc))
++		return -EINVAL;
++
++	skb = ath6kl_wmi_get_new_buf(sizeof(*cmd));
++	if (!skb)
++		return -ENOMEM;
++
++	cmd = (struct wmi_add_igtk_key_cmd *) skb->data;
++	cmd->key_index = key_index;
++	cmd->key_len = key_len;
++	memcpy(cmd->key, key_material, key_len);
++	if (key_rsc != NULL)
++		memcpy(cmd->key_rsc, key_rsc, key_rsc_len);
++
++	ret = ath6kl_wmi_cmd_send(wmi, if_idx, skb, WMI_SET_IGTK_CMDID,
++			sync_flag);
++
++	return ret;
++}
++#endif
++
+ int ath6kl_wmi_add_krk_cmd(struct wmi *wmi, u8 if_idx, u8 *krk)
+ {
+ 	struct sk_buff *skb;
+@@ -3940,6 +4024,12 @@ static int ath6kl_wmi_proc_events_vif(struct net_device *dev, struct wmi *wmi,
+ 		ret = ath6kl_wmi_neighbor_report_event_rx(wmi, datap, len,
+ 							  vif);
+ 		break;
++#ifdef CONFIG_SUPPORT_11W
++	case WMI_GET_RSN_CAP_EVENTID:
++		ath6kl_dbg(ATH6KL_DBG_WMI, "WMI_SCAN_COMPLETE_EVENTID\n");
++		ret = ath6kl_wmi_get_rsn_cap_rx(wmi, datap, len, vif);
++		break;
++#endif
+ 	case WMI_SCAN_COMPLETE_EVENTID:
+ 		ath6kl_dbg(ATH6KL_DBG_WMI, "WMI_SCAN_COMPLETE_EVENTID\n");
+ 		ret = ath6kl_wmi_scan_complete_rx(wmi, datap, len, vif);
+diff --git a/drivers/net/wireless/ath/ath6kl/wmi.h b/drivers/net/wireless/ath/ath6kl/wmi.h
+index da3612c..661e8ad 100644
+--- a/drivers/net/wireless/ath/ath6kl/wmi.h
++++ b/drivers/net/wireless/ath/ath6kl/wmi.h
+@@ -685,10 +685,18 @@ enum auth_mode {
+ 	WPA2_PSK_AUTH = 0x10,
+ 	WPA_AUTH_CCKM = 0x20,
+ 	WPA2_AUTH_CCKM = 0x40,
++#ifdef CONFIG_SUPPORT_11W
++	WPA2_AUTH_SHA256	= 0x80,
++	WPA2_PSK_AUTH_SHA256	= 0x81,
++#endif
+ };
+ 
+ #define WMI_MAX_KEY_INDEX   3
+ 
++#ifdef CONFIG_SUPPORT_11W
++#define WMI_MAX_SUPPORT_11W_KEY_INDEX	5
++#endif
++
+ #define WMI_MAX_KEY_LEN     32
+ 
+ /*
+@@ -797,6 +805,18 @@ struct wmi_delete_cipher_key_cmd {
+ 	u8 key_index;
+ } __packed;
+ 
++#ifdef CONFIG_SUPPORT_11W
++struct wmi_add_igtk_key_cmd {
++	u8     key_index;
++
++	u8     key_len;
++
++	u8     key_rsc[6];/* key replay sequence counter */
++
++	u8     key[WMI_MAX_KEY_LEN];
++} __packed;
++#endif
++
+ #define WMI_KRK_LEN     16
+ 
+ /* WMI_ADD_KRK_CMDID */
+@@ -2159,6 +2179,16 @@ struct wmi_txe_notify_event {
+ 	__le32 pkts;
+ } __packed;
+ 
++#ifdef CONFIG_SUPPORT_11W
++#define RSN_CAP_PREAUTH     0x01
++#define RSN_CAP_MFPR        0x40
++#define RSN_CAP_MFPC        0x80
++
++struct wmi_rsn_cap_cmd {
++	__le16 rsn_cap;
++} __packed;
++#endif
++
+ /* WMI_SET_AKMP_PARAMS_CMD */
+ 
+ struct wmi_pmkid {
+@@ -2656,6 +2686,16 @@ int ath6kl_wmi_addkey_cmd(struct wmi *wmi, u8 if_idx, u8 key_index,
+ 			  u8 *key_material,
+ 			  u8 key_op_ctrl, u8 *mac_addr,
+ 			  enum wmi_sync_flag sync_flag);
++#ifdef CONFIG_SUPPORT_11W
++int ath6kl_wmi_addigtk_cmd(struct wmi *wmi, u8 if_idx, u8 key_index,
++		enum crypto_type key_type,
++		u8 key_usage, u8 key_len,
++		u8 *key_rsc, unsigned int key_rsc_len,
++		u8 *key_material,
++		u8 key_op_ctrl, u8 *mac_addr,
++		enum wmi_sync_flag sync_flag);
++#endif
++
+ int ath6kl_wmi_add_krk_cmd(struct wmi *wmi, u8 if_idx, u8 *krk);
+ int ath6kl_wmi_deletekey_cmd(struct wmi *wmi, u8 if_idx, u8 key_index);
+ int ath6kl_wmi_setpmkid_cmd(struct wmi *wmi, u8 if_idx, const u8 *bssid,
+@@ -2665,6 +2705,10 @@ int ath6kl_wmi_get_tx_pwr_cmd(struct wmi *wmi, u8 if_idx);
+ int ath6kl_wmi_get_roam_tbl_cmd(struct wmi *wmi);
+ 
+ int ath6kl_wmi_set_wmm_txop(struct wmi *wmi, u8 if_idx, enum wmi_txop_cfg cfg);
++#ifdef CONFIG_SUPPORT_11W
++int ath6kl_wmi_get_rsn_cap_cmd(struct wmi *wmi, u8 if_idx);
++int ath6kl_wmi_set_rsn_cap_cmd(struct wmi *wmi, u8 if_idx, u16 rsn_cap);
++#endif
+ int ath6kl_wmi_set_keepalive_cmd(struct wmi *wmi, u8 if_idx,
+ 				 u8 keep_alive_intvl);
+ int ath6kl_wmi_set_htcap_cmd(struct wmi *wmi, u8 if_idx,
+diff --git a/include/linux/ieee80211.h b/include/linux/ieee80211.h
+index 66cedf6..8f680c8 100644
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -1566,6 +1566,11 @@ enum ieee80211_sa_query_action {
+ 
+ #define WLAN_MAX_KEY_LEN		32
+ 
++#ifdef CONFIG_SUPPORT_11W
++#define WLAN_AKM_SUITE_8021X_SHA256	0x000FAC05
++#define WLAN_AKM_SUITE_PSK_SHA256	0x000FAC06
++#endif
++
+ #define WLAN_PMKID_LEN			16
+ 
+ #define WLAN_OUI_WFA			0x506f9a
+diff --git a/include/linux/nl80211.h b/include/linux/nl80211.h
+index 85e5051..d9854f4 100644
+--- a/include/linux/nl80211.h
++++ b/include/linux/nl80211.h
+@@ -363,8 +363,8 @@
+  *	requests to connect to a specified network but without separating
+  *	auth and assoc steps. For this, you need to specify the SSID in a
+  *	%NL80211_ATTR_SSID attribute, and can optionally specify the association
+- *	IEs in %NL80211_ATTR_IE, %NL80211_ATTR_AUTH_TYPE, %NL80211_ATTR_MAC,
+- *	%NL80211_ATTR_WIPHY_FREQ, %NL80211_ATTR_CONTROL_PORT,
++ *	IEs in %NL80211_ATTR_IE, %NL80211_ATTR_AUTH_TYPE, %NL80211_ATTR_USE_MFP,
++ *	%NL80211_ATTR_MAC, %NL80211_ATTR_WIPHY_FREQ, %NL80211_ATTR_CONTROL_PORT,
+  *	%NL80211_ATTR_CONTROL_PORT_ETHERTYPE and
+  *	%NL80211_ATTR_CONTROL_PORT_NO_ENCRYPT.
+  *	Background scan period can optionally be
+@@ -914,7 +914,7 @@ enum nl80211_commands {
+  * @NL80211_ATTR_USE_MFP: Whether management frame protection (IEEE 802.11w) is
+  *	used for the association (&enum nl80211_mfp, represented as a u32);
+  *	this attribute can be used
+- *	with %NL80211_CMD_ASSOCIATE request
++ *	with %NL80211_CMD_ASSOCIATE and %NL80211_CMD_CONNECT requests
+  *
+  * @NL80211_ATTR_STA_FLAGS2: Attribute containing a
+  *	&struct nl80211_sta_flag_update.
+@@ -2380,10 +2380,12 @@ enum nl80211_key_type {
+  * enum nl80211_mfp - Management frame protection state
+  * @NL80211_MFP_NO: Management frame protection not used
+  * @NL80211_MFP_REQUIRED: Management frame protection required
++ * @NL80211_MFP_OPTIONAL: Management frame protection enabled, but not required
+  */
+ enum nl80211_mfp {
+ 	NL80211_MFP_NO,
+ 	NL80211_MFP_REQUIRED,
++    NL80211_MFP_OPTIONAL,
+ };
+ 
+ enum nl80211_wpa_versions {
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index a98830b..f9e658b 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -1056,7 +1056,7 @@ struct cfg80211_auth_request {
+  * @bss: The BSS to associate with.
+  * @ie: Extra IEs to add to (Re)Association Request frame or %NULL
+  * @ie_len: Length of ie buffer in octets
+- * @use_mfp: Use management frame protection (IEEE 802.11w) in this association
++ * @mfp: indicate whether management frame protection is used
+  * @crypto: crypto settings
+  * @prev_bssid: previous BSSID, if not %NULL use reassociate frame
+  */
+@@ -1065,7 +1065,7 @@ struct cfg80211_assoc_request {
+ 	const u8 *ie, *prev_bssid;
+ 	size_t ie_len;
+ 	struct cfg80211_crypto_settings crypto;
+-	bool use_mfp;
++    enum nl80211_mfp mfp;
+ };
+ 
+ /**
+@@ -1160,6 +1160,7 @@ struct cfg80211_ibss_params {
+  * @ie: IEs for association request
+  * @ie_len: Length of assoc_ie in octets
+  * @privacy: indicates whether privacy-enabled APs should be used
++ * @mfp: indicate whether management frame protection is used
+  * @crypto: crypto settings
+  * @key_len: length of WEP key for shared key authentication
+  * @key_idx: index of WEP key for shared key authentication
+@@ -1176,6 +1177,7 @@ struct cfg80211_connect_params {
+ 	u8 *ie;
+ 	size_t ie_len;
+ 	bool privacy;
++	enum nl80211_mfp mfp;
+ 	struct cfg80211_crypto_settings crypto;
+ 	const u8 *key;
+ 	u8 key_len, key_idx;
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index a01e37f..9292440 100644
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -406,11 +406,7 @@ struct ieee80211_if_managed {
+ 	bool beacon_crc_valid;
+ 	u32 beacon_crc;
+ 
+-	enum {
+-		IEEE80211_MFP_DISABLED,
+-		IEEE80211_MFP_OPTIONAL,
+-		IEEE80211_MFP_REQUIRED
+-	} mfp; /* management frame protection */
++    enum nl80211_mfp mfp; /* management frame protection */
+ 
+ 	int wmm_last_param_set;
+ 
+diff --git a/net/mac80211/mlme.c b/net/mac80211/mlme.c
+index 9d1fb85..8838816 100644
+--- a/net/mac80211/mlme.c
++++ b/net/mac80211/mlme.c
+@@ -2704,13 +2704,11 @@ int ieee80211_mgd_assoc(struct ieee80211_sub_if_data *sdata,
+ 	else
+ 		wk->type = IEEE80211_WORK_ASSOC;
+ 
+-	if (req->use_mfp) {
+-		ifmgd->mfp = IEEE80211_MFP_REQUIRED;
+-		ifmgd->flags |= IEEE80211_STA_MFP_ENABLED;
+-	} else {
+-		ifmgd->mfp = IEEE80211_MFP_DISABLED;
+-		ifmgd->flags &= ~IEEE80211_STA_MFP_ENABLED;
+-	}
++    ifmgd->mfp = req->mfp;
++    if (req->mfp != NL80211_MFP_NO)
++        ifmgd->flags |= IEEE80211_STA_MFP_ENABLED;
++    else
++        ifmgd->flags &= ~IEEE80211_STA_MFP_ENABLED;
+ 
+ 	if (req->crypto.control_port)
+ 		ifmgd->flags |= IEEE80211_STA_CONTROL_PORT;
+diff --git a/net/wireless/core.h b/net/wireless/core.h
+index 11ff6bb..61c92d3 100644
+--- a/net/wireless/core.h
++++ b/net/wireless/core.h
+@@ -339,13 +339,13 @@ int __cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 			  struct ieee80211_channel *chan,
+ 			  const u8 *bssid, const u8 *prev_bssid,
+ 			  const u8 *ssid, int ssid_len,
+-			  const u8 *ie, int ie_len, bool use_mfp,
++			  const u8 *ie, int ie_len, enum nl80211_mfp mfp,
+ 			  struct cfg80211_crypto_settings *crypt);
+ int cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 			struct net_device *dev, struct ieee80211_channel *chan,
+ 			const u8 *bssid, const u8 *prev_bssid,
+ 			const u8 *ssid, int ssid_len,
+-			const u8 *ie, int ie_len, bool use_mfp,
++			const u8 *ie, int ie_len, enum nl80211_mfp mfp,
+ 			struct cfg80211_crypto_settings *crypt);
+ int __cfg80211_mlme_deauth(struct cfg80211_registered_device *rdev,
+ 			   struct net_device *dev, const u8 *bssid,
+diff --git a/net/wireless/mlme.c b/net/wireless/mlme.c
+index 4d74154..25abf54 100644
+--- a/net/wireless/mlme.c
++++ b/net/wireless/mlme.c
+@@ -506,7 +506,7 @@ int __cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 			  struct ieee80211_channel *chan,
+ 			  const u8 *bssid, const u8 *prev_bssid,
+ 			  const u8 *ssid, int ssid_len,
+-			  const u8 *ie, int ie_len, bool use_mfp,
++			  const u8 *ie, int ie_len, enum nl80211_mfp mfp,
+ 			  struct cfg80211_crypto_settings *crypt)
+ {
+ 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+@@ -535,7 +535,7 @@ int __cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 	req.ie = ie;
+ 	req.ie_len = ie_len;
+ 	memcpy(&req.crypto, crypt, sizeof(req.crypto));
+-	req.use_mfp = use_mfp;
++    req.mfp = mfp;
+ 	req.prev_bssid = prev_bssid;
+ 	req.bss = cfg80211_get_bss(&rdev->wiphy, chan, bssid, ssid, ssid_len,
+ 				   WLAN_CAPABILITY_ESS, WLAN_CAPABILITY_ESS);
+@@ -573,7 +573,7 @@ int cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 			struct ieee80211_channel *chan,
+ 			const u8 *bssid, const u8 *prev_bssid,
+ 			const u8 *ssid, int ssid_len,
+-			const u8 *ie, int ie_len, bool use_mfp,
++			const u8 *ie, int ie_len, enum nl80211_mfp mfp,
+ 			struct cfg80211_crypto_settings *crypt)
+ {
+ 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+@@ -581,7 +581,7 @@ int cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
+ 
+ 	wdev_lock(wdev);
+ 	err = __cfg80211_mlme_assoc(rdev, dev, chan, bssid, prev_bssid,
+-				    ssid, ssid_len, ie, ie_len, use_mfp, crypt);
++				    ssid, ssid_len, ie, ie_len, mfp, crypt);
+ 	wdev_unlock(wdev);
+ 
+ 	return err;
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 896d19b..0e69a75 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -4493,7 +4493,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
+ 	struct ieee80211_channel *chan;
+ 	const u8 *bssid, *ssid, *ie = NULL, *prev_bssid = NULL;
+ 	int err, ssid_len, ie_len = 0;
+-	bool use_mfp = false;
++    enum nl80211_mfp mfp; 
+ 
+ 	if (!is_valid_ie_attr(info->attrs[NL80211_ATTR_IE]))
+ 		return -EINVAL;
+@@ -4525,14 +4525,15 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
+ 		ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
+ 	}
+ 
+-	if (info->attrs[NL80211_ATTR_USE_MFP]) {
+-		enum nl80211_mfp mfp =
+-			nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
+-		if (mfp == NL80211_MFP_REQUIRED)
+-			use_mfp = true;
+-		else if (mfp != NL80211_MFP_NO)
+-			return -EINVAL;
+-	}
++    if (info->attrs[NL80211_ATTR_USE_MFP]) {
++        mfp = nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
++        if (mfp != NL80211_MFP_REQUIRED &&
++            mfp != NL80211_MFP_OPTIONAL &&
++            mfp != NL80211_MFP_NO)
++        return -EINVAL;
++    }else{
++        mfp = NL80211_MFP_NO;
++    }
+ 
+ 	if (info->attrs[NL80211_ATTR_PREV_BSSID])
+ 		prev_bssid = nla_data(info->attrs[NL80211_ATTR_PREV_BSSID]);
+@@ -4540,7 +4541,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
+ 	err = nl80211_crypto_settings(rdev, info, &crypto, 1);
+ 	if (!err)
+ 		err = cfg80211_mlme_assoc(rdev, dev, chan, bssid, prev_bssid,
+-					  ssid, ssid_len, ie, ie_len, use_mfp,
++					  ssid, ssid_len, ie, ie_len, mfp,
+ 					  &crypto);
+ 
+ 	return err;
+@@ -5022,6 +5023,16 @@ static int nl80211_connect(struct sk_buff *skb, struct genl_info *info)
+ 		connect.ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
+ 	}
+ 
++    if (info->attrs[NL80211_ATTR_USE_MFP]) { 
++        connect.mfp = nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
++        if (connect.mfp != NL80211_MFP_REQUIRED &&  
++            connect.mfp != NL80211_MFP_OPTIONAL &&   
++            connect.mfp != NL80211_MFP_NO)           
++        return -EINVAL;         
++    } else { 
++        connect.mfp = NL80211_MFP_NO;   
++    }
++
+ 	if (info->attrs[NL80211_ATTR_WIPHY_FREQ]) {
+ 		connect.channel =
+ 			ieee80211_get_channel(wiphy,
+diff --git a/net/wireless/sme.c b/net/wireless/sme.c
+index 38d3248..f02e0bc 100644
+--- a/net/wireless/sme.c
++++ b/net/wireless/sme.c
+@@ -190,7 +190,9 @@ static int cfg80211_conn_do_work(struct wireless_dev *wdev)
+ 					    prev_bssid,
+ 					    params->ssid, params->ssid_len,
+ 					    params->ie, params->ie_len,
+-					    false, &params->crypto);
++					    params->mfp,
++					    &params->crypto);
++
+ 		if (err)
+ 			__cfg80211_mlme_deauth(rdev, wdev->netdev, params->bssid,
+ 					       NULL, 0,
+-- 
+1.7.9.5
+

@@ -26,6 +26,9 @@
 #include "target.h"
 #include "debug.h"
 #include "hif-ops.h"
+#ifdef CONFIG_ATH6KL_LEDS
+#include "leds.h"
+#endif
 
 unsigned int debug_mask;
 static unsigned int testmode;
@@ -36,6 +39,11 @@ static unsigned short locally_administered_bit;
 static unsigned int recovery_enable;
 static unsigned int heart_beat_poll = 2000;
 static unsigned int softmac_enable;
+#ifdef CONFIG_ATH6KL_LEDS
+static unsigned int activity_led_gpio = -1;
+static unsigned int scanning_led_gpio = -1;
+static unsigned int leds_active_high = 0;
+#endif
 
 module_param(debug_mask, uint, 0644);
 module_param(testmode, uint, 0644);
@@ -49,6 +57,11 @@ MODULE_PARM_DESC(heart_beat_poll, "Enable fw error detection periodic" \
 		 "polling. This also specifies the polling interval in msecs");
 MODULE_PARM_DESC(recovery_enable, "Enable recovery from firmware error");
 module_param(softmac_enable, uint, 0644);
+#ifdef CONFIG_ATH6KL_LEDS
+module_param(activity_led_gpio, uint, 0644);
+module_param(scanning_led_gpio, uint, 0644);
+module_param(leds_active_high, uint, 0644);
+#endif
 
 static const struct ath6kl_hw hw_list[] = {
 	{
@@ -632,6 +645,9 @@ void ath6kl_core_free(struct ath6kl *ar)
 
 void ath6kl_core_cleanup(struct ath6kl *ar)
 {
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_deinit(ar);
+#endif
 	ath6kl_hif_power_off(ar);
 
 	ath6kl_recovery_cleanup(ar);
@@ -1894,10 +1910,22 @@ int ath6kl_core_init(struct ath6kl *ar)
 
 	set_bit(FIRST_BOOT, &ar->flag);
 
+#ifdef CONFIG_ATH6KL_LEDS
+	ret = leds_init(ar, activity_led_gpio, scanning_led_gpio, leds_active_high);
+	if (ret) {
+		ath6kl_err("Failed to initialize LEDs: %d\n", ret);
+		goto err_rxbuf_cleanup;
+	}
+#endif
+
 	ret = ath6kl_init_hw_start(ar);
 	if (ret) {
 		ath6kl_err("Failed to start hardware: %d\n", ret);
+#ifdef CONFIG_ATH6KL_LEDS
+		goto err_leds_deinit;
+#else
 		goto err_rxbuf_cleanup;
+#endif
 	}
 
 	/* give our connected endpoints some buffers */
@@ -1923,6 +1951,10 @@ int ath6kl_core_init(struct ath6kl *ar)
 
 	return ret;
 
+#ifdef CONFIG_ATH6KL_LEDS
+err_leds_deinit:
+	leds_deinit(ar);
+#endif
 err_rxbuf_cleanup:
 	ath6kl_htc_flush_rx_buf(ar->htc_target);
 	ath6kl_cleanup_amsdu_rxbufs(ar);

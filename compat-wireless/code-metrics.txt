@@ -9,6 +9,6 @@
 [01;32m     11514[00m - total backport code
 [31m    1.3949[00m - % of code consists of backport work
 
-Base tree: [01;32m[00m
-Base tree version: [35mbranching-rel-3.2.3-73-g263e071[00m
+Base tree: [01;32math6kl.git[00m
+Base tree version: [35mbranching-rel-3.2.3-74-g39f7005[00m
 compat-wireless release: [01;33m3.3-OSR-2012-10-11-15-g2bd3ebf[00m

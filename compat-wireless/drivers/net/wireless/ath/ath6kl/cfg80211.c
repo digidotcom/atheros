@@ -24,6 +24,9 @@
 #include "hif-ops.h"
 #include "testmode.h"
 #include "cfg80211_btcoex.h"
+#ifdef CONFIG_ATH6KL_LEDS
+#include "leds.h"
+#endif
 
 static unsigned int ath6kl_p2p;
 
@@ -152,6 +155,10 @@ static bool __ath6kl_cfg80211_sscan_stop(struct ath6kl_vif *vif)
 	if (!test_and_clear_bit(SCHED_SCANNING, &vif->flags))
 		return false;
 
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_scanning_state(vif, 0);
+#endif
+
 	del_timer_sync(&vif->sched_scan_timer);
 
 	if (ar->state == ATH6KL_STATE_RECOVERY)
@@ -279,7 +286,24 @@ static void ath6kl_set_key_mgmt(struct ath6kl_vif *vif, u32 key_mgmt)
 			vif->auth_mode = WPA_AUTH_CCKM;
 		else if (vif->auth_mode == WPA2_AUTH)
 			vif->auth_mode = WPA2_AUTH_CCKM;
+#ifdef CONFIG_SUPPORT_11W
+	} else if (key_mgmt == WLAN_AKM_SUITE_8021X_SHA256) {
+		if (vif->auth_mode == WPA_AUTH){
+			ath6kl_err("%s: auth_mode %x not supported key_mgmt %x\n", __func__, vif->auth_mode,key_mgmt);
+			return ;
+		}
+		else if (vif->auth_mode == WPA2_AUTH)
+			vif->auth_mode = WPA2_AUTH_SHA256;
+	} else if (key_mgmt == WLAN_AKM_SUITE_PSK_SHA256) {
+		if (vif->auth_mode == WPA_AUTH){
+			ath6kl_err("%s: auth_mode %x not supported key_mgmt %x\n", __func__, vif->auth_mode,key_mgmt);
+			return ;
+		}
+		else if (vif->auth_mode == WPA2_AUTH)
+			vif->auth_mode = WPA2_PSK_AUTH_SHA256;
+#endif
 	} else if (key_mgmt != WLAN_AKM_SUITE_8021X) {
+
 		vif->auth_mode = NONE_AUTH;
 	}
 }
@@ -530,6 +554,21 @@ static int ath6kl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	if (sme->bssid && !is_broadcast_ether_addr(sme->bssid))
 		memcpy(vif->req_bssid, sme->bssid, sizeof(vif->req_bssid));
 
+#ifdef CONFIG_SUPPORT_11W
+	{
+		u16 rsn_cap =  0;
+
+        ath6kl_err("ath6kl_cfg80211_connect: sme->mfp = %d\n", sme->mfp);
+        if ( sme->mfp == NL80211_MFP_REQUIRED ) {
+            rsn_cap = 0xc0;
+        }else if ( sme->mfp == NL80211_MFP_OPTIONAL ) {
+            rsn_cap = 0x80;
+        }
+		ath6kl_wmi_set_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx, rsn_cap);
+	}
+#endif
+
+
 	ath6kl_set_wpa_version(vif, sme->crypto.wpa_versions);
 
 	status = ath6kl_set_auth_type(vif, sme->auth_type);
@@ -617,6 +656,17 @@ static int ath6kl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 		}
 	}
 
+	/* disable background scan if period is 0 */
+	if (sme->bg_scan_period == 0)
+		sme->bg_scan_period = 0xffff;
+
+	/* configure default value if not specified */
+	if (sme->bg_scan_period == -1)
+		sme->bg_scan_period = DEFAULT_BG_SCAN_PERIOD;
+
+	ath6kl_wmi_scanparams_cmd(ar->wmi, vif->fw_vif_idx, 0, 0,
+				  sme->bg_scan_period, 0, 0, 0, 3, 0, 0, 0);
+
 	/* If GC connect GO when other SAP existed, teardown SAP firstly */
 	if (vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT)
 		ath6kl_disconnect_existed_ap(ar);
@@ -629,17 +679,6 @@ static int ath6kl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 					vif->ssid_len, vif->ssid,
 					vif->req_bssid, vif->ch_hint,
 					ar->connect_ctrl_flags, nw_subtype);
-
-	/* disable background scan if period is 0 */
-	if (sme->bg_scan_period == 0)
-		sme->bg_scan_period = 0xffff;
-
-	/* configure default value if not specified */
-	if (sme->bg_scan_period == -1)
-		sme->bg_scan_period = DEFAULT_BG_SCAN_PERIOD;
-
-	ath6kl_wmi_scanparams_cmd(ar->wmi, vif->fw_vif_idx, 0, 0,
-				  sme->bg_scan_period, 0, 0, 0, 3, 0, 0, 0);
 
 	up(&ar->sem);
 
@@ -793,6 +832,10 @@ void ath6kl_cfg80211_connect_event(struct ath6kl_vif *vif, u16 channel,
 					assoc_resp_ie, assoc_resp_len,
 					WLAN_STATUS_SUCCESS, GFP_KERNEL);
 		cfg80211_put_bss(bss);
+
+#ifdef CONFIG_ATH6KL_LEDS
+		leds_set_connection_state(vif, 1);
+#endif
 	} else if (vif->sme_state == SME_CONNECTED) {
 		/* inform roam event to cfg80211 */
 		cfg80211_roamed_bss(vif->ndev, bss, assoc_req_ie, assoc_req_len,
@@ -835,6 +878,10 @@ static int ath6kl_cfg80211_disconnect(struct wiphy *wiphy,
 	up(&ar->sem);
 
 	vif->sme_state = SME_DISCONNECTED;
+
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_connection_state(vif, 0);
+#endif
 
 	return 0;
 }
@@ -890,6 +937,10 @@ void ath6kl_cfg80211_disconnect_event(struct ath6kl_vif *vif, u8 reason,
 	}
 
 	vif->sme_state = SME_DISCONNECTED;
+
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_connection_state(vif, 0);
+#endif
 
 	/*
 	 * Send a disconnect command to target when a disconnect event is
@@ -1069,6 +1120,10 @@ static int ath6kl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 
 	kfree(channels);
 
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_scanning_state(vif, 1);
+#endif
+
 	return ret;
 }
 
@@ -1105,6 +1160,10 @@ void ath6kl_cfg80211_scan_complete_event(struct ath6kl_vif *vif, bool aborted)
 
 out:
 	cfg80211_scan_done(request, aborted);
+
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_scanning_state(vif, 0);
+#endif
 }
 
 void ath6kl_cfg80211_ch_switch_notify(struct ath6kl_vif *vif, int freq,
@@ -1132,6 +1191,9 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
 	int seq_len;
 	u8 key_usage;
 	u8 key_type;
+#ifdef CONFIG_SUPPORT_11W
+	u8 max_key_index;
+#endif
 
 	if (!ath6kl_cfg80211_ready(vif))
 		return -EIO;
@@ -1143,10 +1205,19 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
 					      params->key);
 	}
 
+
+#ifdef CONFIG_SUPPORT_11W
+	if (WLAN_CIPHER_SUITE_AES_CMAC == params->cipher)
+		max_key_index = WMI_MAX_SUPPORT_11W_KEY_INDEX;
+	else
+		max_key_index = WMI_MAX_KEY_INDEX;
+	if (key_index > max_key_index) {
+#else
 	if (key_index > WMI_MAX_KEY_INDEX) {
+#endif
 		ath6kl_dbg(ATH6KL_DBG_WLAN_CFG,
-			   "%s: key index %d out of bounds\n", __func__,
-			   key_index);
+				"%s: key index %d out of bounds\n", __func__,
+				key_index);
 		return -ENOENT;
 	}
 
@@ -1190,6 +1261,12 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
 	case WLAN_CIPHER_SUITE_SMS4:
 		key_type = WAPI_CRYPT;
 		break;
+
+#ifdef CONFIG_SUPPORT_11W
+	case WLAN_CIPHER_SUITE_AES_CMAC:
+		key_type = AES_128_CMAC_CRYPT;
+		break;
+#endif
 
 	default:
 		return -ENOTSUPP;
@@ -1240,11 +1317,24 @@ static int ath6kl_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
 		return 0;
 	}
 
-	return ath6kl_wmi_addkey_cmd(ar->wmi, vif->fw_vif_idx, key_index,
-				     key_type, key_usage, key->key_len,
-				     key->seq, key->seq_len, key->key,
-				     KEY_OP_INIT_VAL,
-				     (u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
+#ifdef CONFIG_SUPPORT_11W
+	if (AES_128_CMAC_CRYPT == key_type){
+		return ath6kl_wmi_addigtk_cmd(ar->wmi, vif->fw_vif_idx, key_index,
+				key_type, key_usage, key->key_len,
+				key->seq, key->seq_len, key->key,
+				KEY_OP_INIT_VAL,
+				(u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
+	}else {
+#endif
+		return ath6kl_wmi_addkey_cmd(ar->wmi, vif->fw_vif_idx, key_index,
+				key_type, key_usage, key->key_len,
+				key->seq, key->seq_len, key->key,
+				KEY_OP_INIT_VAL,
+				(u8 *) mac_addr, SYNC_BOTH_WMIFLAG);
+#ifdef CONFIG_SUPPORT_11W
+	}
+#endif
+
 }
 
 static int ath6kl_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
@@ -1259,7 +1349,12 @@ static int ath6kl_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
 	if (!ath6kl_cfg80211_ready(vif))
 		return -EIO;
 
+#ifdef CONFIG_SUPPORT_11W
+	if (key_index > WMI_MAX_SUPPORT_11W_KEY_INDEX) {
+#else
 	if (key_index > WMI_MAX_KEY_INDEX) {
+#endif
+
 		ath6kl_dbg(ATH6KL_DBG_WLAN_CFG,
 			   "%s: key index %d out of bounds\n", __func__,
 			   key_index);
@@ -1711,6 +1806,9 @@ static const u32 cipher_suites[] = {
 	WLAN_CIPHER_SUITE_CCMP,
 	CCKM_KRK_CIPHER_SUITE,
 	WLAN_CIPHER_SUITE_SMS4,
+#ifdef CONFIG_SUPPORT_11W
+	WLAN_CIPHER_SUITE_AES_CMAC,
+#endif
 };
 
 static bool is_rate_legacy(s32 rate)
@@ -2789,6 +2887,20 @@ static int ath6kl_ap_beacon(struct wiphy *wiphy, struct net_device *dev,
 			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
 				p.auth_mode |= WPA2_PSK_AUTH;
 			break;
+#ifdef CONFIG_SUPPORT_11W
+		case WLAN_AKM_SUITE_8021X_SHA256:
+			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_1)
+				ath6kl_err("WLAN_AKM_SUITE_8021X_SHA256 is not supported in wpa_versions %x\n",info->crypto.wpa_versions);
+			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
+				p.auth_mode |= WPA2_AUTH_SHA256;
+			break;
+		case WLAN_AKM_SUITE_PSK_SHA256:
+			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_1)
+				ath6kl_err("WLAN_AKM_SUITE_PSK_SHA256 is not supported in wpa_versions %x\n",info->crypto.wpa_versions);
+			if (info->crypto.wpa_versions & NL80211_WPA_VERSION_2)
+				p.auth_mode |= WPA2_PSK_AUTH_SHA256;
+			break;
+#endif
 		}
 	}
 	if (p.auth_mode == 0)
@@ -2858,7 +2970,11 @@ static int ath6kl_ap_beacon(struct wiphy *wiphy, struct net_device *dev,
 	 * advertise the same in beacon/probe response. Send
 	 * the complete RSN IE capability field to firmware
 	 */
+#ifdef CONFIG_SUPPORT_11W
+	if ((p.auth_mode & (WPA2_AUTH | WPA2_PSK_AUTH | WPA2_AUTH_SHA256 | WPA2_PSK_AUTH_SHA256)) && (info->tail) &&
+#else
 	if ((p.auth_mode & (WPA2_AUTH | WPA2_PSK_AUTH)) && (info->tail) &&
+#endif
 	    test_bit(ATH6KL_FW_CAPABILITY_RSN_CAP_OVERRIDE,
 		     ar->fw_capabilities)) {
 		rsn_capb = 0;
@@ -3337,6 +3453,10 @@ static int ath6kl_cfg80211_sscan_start(struct wiphy *wiphy,
 
 	set_bit(SCHED_SCANNING, &vif->flags);
 
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_scanning_state(vif, 1);
+#endif
+
 	return 0;
 }
 
@@ -3523,6 +3643,10 @@ void ath6kl_cfg80211_stop(struct ath6kl_vif *vif)
 	vif->sme_state = SME_DISCONNECTED;
 	clear_bit(CONNECTED, &vif->flags);
 	clear_bit(CONNECT_PEND, &vif->flags);
+
+#ifdef CONFIG_ATH6KL_LEDS
+	leds_set_connection_state(vif, 0);
+#endif
 
 	/* Stop netdev queues, needed during recovery */
 	netif_stop_queue(vif->ndev);

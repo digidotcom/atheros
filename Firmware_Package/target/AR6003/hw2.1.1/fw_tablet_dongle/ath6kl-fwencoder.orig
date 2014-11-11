@@ -245,7 +245,11 @@ def dump(options, args, extract=False):
 
             for capa in c.get_capabilities():
                 # find value from the dict
-                name = [key for key, value in capability_map.iteritems() if value == capa][0]
+                try:
+                    name = [key for key, value in capability_map.iteritems() if value == capa][0]
+                except IndexError:
+                    name = str(capa)
+
                 s = s + name + ","
 
             if len(s) > 0:

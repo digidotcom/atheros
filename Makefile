@@ -34,7 +34,13 @@ else #ifneq ($(KERNELRELEASE),)
 all: install
 
 SHELL     = /bin/bash
-FIRMWARE := $(addprefix fw_tablet_dongle/, athtcmd_ram.bin athwlan.bin fw-4.bin nullTestFlow.bin utf.bin)
+FIRMWARE := $(addprefix fw_tablet_dongle/, athtcmd_ram.bin athwlan.bin nullTestFlow.bin utf.bin)
+# Capsule uses CCX which has a different radio firmware image.
+ifeq ("$(DEL_PRODUCT)","capsule-dtsx10")
+FIRMWARE += $(addprefix TABLET_DONGLE_CCX.DIGI_RELEASE/, fw-4.bin)
+else
+FIRMWARE += $(addprefix fw_tablet_dongle/, fw-4.bin)
+endif
 FIRMWARE += Digi_6203-6233-US.bin Digi_6203-6233-World.bin
 ifeq ("$(DEL_PLATFORM)","cpx2")
 FIRMWARE += calData_AR6103_Digi_X2e_B.bin calData_AR6103_Digi_X2e_B_world.bin
@@ -54,7 +60,7 @@ install:
 	@depmod -a -b $(INSTALL_MOD_PATH) $(KRELEASE)
 	@rm -rf $(INSTALL_MOD_PATH)/lib/firmware/ath6k/AR6003/hw2.1.1 && \
 		mkdir -p $(INSTALL_MOD_PATH)/lib/firmware/ath6k/AR6003/hw2.1.1
-	@$(foreach fw, $(addprefix Firmware_Package/target/AR6003/hw2.1.1/, $(FIRMWARE)), \
+	@set -e; $(foreach fw, $(addprefix Firmware_Package/target/AR6003/hw2.1.1/, $(FIRMWARE)), \
 		install -m 0644 $(fw) $(INSTALL_MOD_PATH)/lib/firmware/ath6k/AR6003/hw2.1.1/;)
 
 clean:

@@ -4493,7 +4493,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 	struct ieee80211_channel *chan;
 	const u8 *bssid, *ssid, *ie = NULL, *prev_bssid = NULL;
 	int err, ssid_len, ie_len = 0;
-	bool use_mfp = false;
+    enum nl80211_mfp mfp;
 
 	if (!is_valid_ie_attr(info->attrs[NL80211_ATTR_IE]))
 		return -EINVAL;
@@ -4525,14 +4525,15 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 		ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
 	}
 
-	if (info->attrs[NL80211_ATTR_USE_MFP]) {
-		enum nl80211_mfp mfp =
-			nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
-		if (mfp == NL80211_MFP_REQUIRED)
-			use_mfp = true;
-		else if (mfp != NL80211_MFP_NO)
-			return -EINVAL;
-	}
+    if (info->attrs[NL80211_ATTR_USE_MFP]) {
+        mfp = nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
+        if (mfp != NL80211_MFP_REQUIRED &&
+            mfp != NL80211_MFP_OPTIONAL &&
+            mfp != NL80211_MFP_NO)
+        return -EINVAL;
+    }else{
+        mfp = NL80211_MFP_NO;
+    }
 
 	if (info->attrs[NL80211_ATTR_PREV_BSSID])
 		prev_bssid = nla_data(info->attrs[NL80211_ATTR_PREV_BSSID]);
@@ -4540,7 +4541,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 	err = nl80211_crypto_settings(rdev, info, &crypto, 1);
 	if (!err)
 		err = cfg80211_mlme_assoc(rdev, dev, chan, bssid, prev_bssid,
-					  ssid, ssid_len, ie, ie_len, use_mfp,
+					  ssid, ssid_len, ie, ie_len, mfp,
 					  &crypto);
 
 	return err;
@@ -5021,6 +5022,16 @@ static int nl80211_connect(struct sk_buff *skb, struct genl_info *info)
 		connect.ie = nla_data(info->attrs[NL80211_ATTR_IE]);
 		connect.ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
 	}
+
+    if (info->attrs[NL80211_ATTR_USE_MFP]) {
+        connect.mfp = nla_get_u32(info->attrs[NL80211_ATTR_USE_MFP]);
+        if (connect.mfp != NL80211_MFP_REQUIRED &&
+            connect.mfp != NL80211_MFP_OPTIONAL &&
+            connect.mfp != NL80211_MFP_NO)
+        return -EINVAL;
+    } else {
+        connect.mfp = NL80211_MFP_NO;
+    }
 
 	if (info->attrs[NL80211_ATTR_WIPHY_FREQ]) {
 		connect.channel =

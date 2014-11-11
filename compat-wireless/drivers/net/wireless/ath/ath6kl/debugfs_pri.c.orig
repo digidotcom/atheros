@@ -246,99 +246,6 @@ static const struct file_operations fops_bmisstime = {
 	.llseek = default_llseek,
 };
 
-#ifdef CONFIG_SUPPORT_11W
-static ssize_t ath6kl_rsn_cap_write(struct file *file,
-		const char __user *user_buf,
-		size_t count, loff_t *ppos)
-{
-	struct ath6kl *ar = file->private_data;
-	struct ath6kl_vif *vif;
-	u16 rsn_cap;
-	char buf[32];
-	ssize_t len;
-	int ret;
-
-	if (WARN_ON(!test_bit(WMI_READY, &ar->flag)))
-		return -EIO;
-
-	vif = ath6kl_vif_first(ar);
-	if (!vif)
-		return -EIO;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtou16(buf, 0, &rsn_cap))
-		return -EINVAL;
-
-	vif->rsn_cap = rsn_cap;
-
-	ret = ath6kl_wmi_set_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx,
-			vif->rsn_cap);
-	if (ret) {
-		ath6kl_err("failed to set rsn cap:%d\n", ret);
-		return ret;
-	}
-
-	return count;
-}
-
-static ssize_t ath6kl_rsn_cap_read(struct file *file, char __user *user_buf,
-		size_t count, loff_t *ppos)
-{
-	struct ath6kl *ar = file->private_data;
-	struct ath6kl_vif *vif;
-	char buf[32];
-	long left;
-	int ret;
-	ssize_t len;
-
-	if (WARN_ON(!test_bit(WMI_READY, &ar->flag)))
-		return -EIO;
-
-	vif = ath6kl_vif_first(ar);
-	if (!vif)
-		return -EIO;
-
-	if (down_interruptible(&ar->sem)) {
-		return -EBUSY;
-	}
-
-	set_bit(STATS_UPDATE_PEND, &vif->flags);
-
-	ret = ath6kl_wmi_get_rsn_cap_cmd(ar->wmi, vif->fw_vif_idx);
-	if (ret) {
-		up(&ar->sem);
-		ath6kl_err("ath6kl_wmi_get_rsn_cap_cmd failed:%d \n", ret);
-		return -EIO;
-	}
-
-	left = wait_event_interruptible_timeout(ar->event_wq,
-			!test_bit(STATS_UPDATE_PEND,
-				&vif->flags), WMI_TIMEOUT);
-
-	up(&ar->sem);
-
-	if (left <= 0) {
-		ath6kl_err("wait_event_interruptible_timeout\n");
-		return -ETIMEDOUT;
-	}
-
-	len = scnprintf(buf, sizeof(buf), "%u\n", vif->rsn_cap);
-	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
-}
-
-static const struct file_operations fops_rsn_cap = {
-	.open = ath6kl_debugfs_open_pri,
-	.read = ath6kl_rsn_cap_read,
-	.write = ath6kl_rsn_cap_write,
-	.owner = THIS_MODULE,
-	.llseek = default_llseek,
-};
-#endif
-
 int ath6kl_init_debugfs_pri(struct ath6kl *ar)
 {
 	debugfs_create_file("disconnect", S_IWUSR, ar->debugfs_phy, ar,
@@ -349,10 +256,6 @@ int ath6kl_init_debugfs_pri(struct ath6kl *ar)
 
 	debugfs_create_file("bmiss_time", S_IRUSR | S_IWUSR, ar->debugfs_phy,
 			    ar, &fops_bmisstime);
-#ifdef CONFIG_SUPPORT_11W
-	debugfs_create_file("rsn_cap", S_IRUSR | S_IWUSR, ar->debugfs_phy, ar,
-			&fops_rsn_cap);
-#endif
 
 	return 0;
 }

@@ -38,3 +38,15 @@ config ATH6KL_REGDOMAIN
 	  Enabling this makes it possible to change the regdomain in
 	  the firmware. This can be only enabled if regulatory requirements
 	  are taken into account.
+
+config ATH6KL_LEDS
+	bool "Atheros ath6kl LED support"
+	depends on ATH6KL && MACH_CCARDWMX28JS
+	default y
+	---help---
+	  LED handling for Atheros wireless driver. This uses two GPIOs of
+	  the CPU to handle a bicolor LED with the following meaning:
+	  - LED off:        The Wi-Fi NIC is disabled
+	  - Solid yellow:   Unit is scanning for a network
+	  - Blinking green: Traffic is on the Wif-Fi connection
+	  - Solid green:    Unit is associated with an access point

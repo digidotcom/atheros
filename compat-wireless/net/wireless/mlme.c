@@ -506,7 +506,7 @@ int __cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
 			  struct ieee80211_channel *chan,
 			  const u8 *bssid, const u8 *prev_bssid,
 			  const u8 *ssid, int ssid_len,
-			  const u8 *ie, int ie_len, bool use_mfp,
+			  const u8 *ie, int ie_len, enum nl80211_mfp mfp,
 			  struct cfg80211_crypto_settings *crypt)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
@@ -535,7 +535,7 @@ int __cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
 	req.ie = ie;
 	req.ie_len = ie_len;
 	memcpy(&req.crypto, crypt, sizeof(req.crypto));
-	req.use_mfp = use_mfp;
+    req.mfp = mfp;
 	req.prev_bssid = prev_bssid;
 	req.bss = cfg80211_get_bss(&rdev->wiphy, chan, bssid, ssid, ssid_len,
 				   WLAN_CAPABILITY_ESS, WLAN_CAPABILITY_ESS);
@@ -573,7 +573,7 @@ int cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
 			struct ieee80211_channel *chan,
 			const u8 *bssid, const u8 *prev_bssid,
 			const u8 *ssid, int ssid_len,
-			const u8 *ie, int ie_len, bool use_mfp,
+			const u8 *ie, int ie_len, enum nl80211_mfp mfp,
 			struct cfg80211_crypto_settings *crypt)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
@@ -581,7 +581,7 @@ int cfg80211_mlme_assoc(struct cfg80211_registered_device *rdev,
 
 	wdev_lock(wdev);
 	err = __cfg80211_mlme_assoc(rdev, dev, chan, bssid, prev_bssid,
-				    ssid, ssid_len, ie, ie_len, use_mfp, crypt);
+				    ssid, ssid_len, ie, ie_len, mfp, crypt);
 	wdev_unlock(wdev);
 
 	return err;
